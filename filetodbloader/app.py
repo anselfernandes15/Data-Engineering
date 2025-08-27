@@ -4,6 +4,9 @@ import os
 import json
 import re
 import pandas as pd
+from dotenv import load_dotenv
+import multiprocessing
+
 
 
 def get_column_names(schemas, ds_name, sorting_key='column_position'):
@@ -25,7 +28,8 @@ def to_sql(df, db_conn_uri, ds_name):
         ds_name,
         db_conn_uri,
         if_exists='append',
-        index=False
+        index=False,
+        method='multi'
     )
 
 
@@ -41,33 +45,56 @@ def db_loader(src_base_dir, db_conn_uri, ds_name):
             print(f'Populating chunk {idx} of {ds_name}')
             to_sql(df, db_conn_uri, ds_name)
 
+def process_dataset(args):
+    src_base_dir = args[0]
+    db_conn_uri = args [1]
+    ds_name = args[2]
+    try:
+        print(f'Processing {ds_name}')
+        db_loader(src_base_dir, db_conn_uri, ds_name)
+    except NameError as ne:
+        print(ne)
+        pass
+    except Exception as e:
+        print(e)
+        pass
+    finally:
+        print(f'Data Processing of {ds_name} is complete')
+
+
 
 def process_files(ds_names=None):
-    src_base_dir = os.environ.get('SRC_BASE_DIR')
-    db_host = os.environ.get('DB_HOST')
-    db_port = os.environ.get('DB_PORT')
-    db_name = os.environ.get('DB_NAME')
-    db_user = os.environ.get('DB_USER')
-    db_pass = os.environ.get('DB_PASS')
+    load_dotenv()
+    src_base_dir = os.getenv('SRC_BASE_DIR')
+    db_host = os.getenv('DB_HOST')
+    db_port = os.getenv('DB_PORT')
+    db_name = os.getenv('DB_NAME')
+    db_user = os.getenv('DB_USER')
+    db_pass = os.getenv('DB_PASS')
+    print(f'{src_base_dir}')
+
+    # src_base_dir = os.environ.get('SRC_BASE_DIR')
+    # db_host = os.environ.get('DB_HOST')
+    # db_port = os.environ.get('DB_PORT')
+    # db_name = os.environ.get('DB_NAME')
+    # db_user = os.environ.get('DB_USER')
+    # db_pass = os.environ.get('DB_PASS')
     db_conn_uri = f'postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
     schemas = json.load(open(f'{src_base_dir}/schemas.json'))
     if not ds_names:
         ds_names = schemas.keys()
+
+    pprocesses = len(ds_names)  if len(ds_names) < 32 else 32 
+    pool = multiprocessing.Pool(pprocesses)
+    pd_args = []
     for ds_name in ds_names:
-        try:
-            print(f'Processing {ds_name}')
-            db_loader(src_base_dir, db_conn_uri, ds_name)
-        except NameError as ne:
-            print(ne)
-            pass
-        except Exception as e:
-            print(e)
-            pass
-        finally:
-            print(f'Error Processing {ds_name}')
+        pd_args.append(((src_base_dir, db_conn_uri, ds_name)))
+        # process_dataset((src_base_dir, db_conn_uri, ds_name))
+    pool.map(process_dataset, pd_args)
 
 
 if __name__ == '__main__':
+    print(f'--------------------------------{len(sys.argv)}')
     if len(sys.argv) == 2:
         ds_names = json.loads(sys.argv[1]) 
         process_files(ds_names)
